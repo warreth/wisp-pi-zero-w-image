@@ -113,12 +113,17 @@ jobs:
           cp config .build/pi-gen/config
           rm -f .build/pi-gen/stage2/EXPORT_IMAGE
           cp -a stage-wisp .build/pi-gen/stage-wisp
+          # Docker's default bridge DNS is unreliable on hosted runners.
+          sed -i 's|build --build-arg BASE_IMAGE|build --network host --build-arg BASE_IMAGE|' \
+            .build/pi-gen/build-docker.sh
           ./scripts/fetch-wisp.sh "${{ needs.check.outputs.version }}" \
             .build/pi-gen/stage-wisp/00-install/files
 
       - name: Build image
         working-directory: .build/pi-gen
-        run: sudo ./build-docker.sh
+        env:
+          PIGEN_DOCKER_OPTS: --network host
+        run: sudo -E ./build-docker.sh
 
       - name: Collect image
         id: image
