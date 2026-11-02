@@ -82,7 +82,16 @@ jobs:
       - name: Install host tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y file xz-utils binutils qemu-user-static binfmt-support
+          sudo apt-get install -y file xz-utils binutils qemu-user-static binfmt-support shellcheck
+
+      - name: Shellcheck scripts
+        run: |
+          shellcheck -S warning \
+            stage-wisp/prerun.sh \
+            stage-wisp/00-install/00-run.sh \
+            stage-wisp/00-install/01-run-chroot.sh \
+            stage-wisp/00-install/files/wisp-firstboot \
+            scripts/*.sh
 
       - name: Clone pinned pi-gen (bookworm / armhf)
         run: |
