@@ -113,17 +113,19 @@ jobs:
           cp config .build/pi-gen/config
           rm -f .build/pi-gen/stage2/EXPORT_IMAGE
           cp -a stage-wisp .build/pi-gen/stage-wisp
-          # Docker's default bridge DNS is unreliable on hosted runners.
-          sed -i 's|build --build-arg BASE_IMAGE|build --network host --build-arg BASE_IMAGE|' \
+          # Docker DNS to deb.debian.org is unreliable on hosted runners.
+          # Pin the Fastly addresses and use host networking for the build.
+          DEBIAN_HOSTS="--add-host deb.debian.org:151.101.2.132 --add-host security.debian.org:151.101.2.132"
+          sed -i "s|PIGEN_DOCKER_OPTS=\${PIGEN_DOCKER_OPTS:-\"\"}|PIGEN_DOCKER_OPTS=\${PIGEN_DOCKER_OPTS:-\"${DEBIAN_HOSTS}\"}|" \
+            .build/pi-gen/build-docker.sh
+          sed -i 's|build --build-arg BASE_IMAGE|build --add-host deb.debian.org:151.101.2.132 --add-host security.debian.org:151.101.2.132 --build-arg BASE_IMAGE|' \
             .build/pi-gen/build-docker.sh
           ./scripts/fetch-wisp.sh "${{ needs.check.outputs.version }}" \
             .build/pi-gen/stage-wisp/00-install/files
 
       - name: Build image
         working-directory: .build/pi-gen
-        env:
-          PIGEN_DOCKER_OPTS: --network host
-        run: sudo -E ./build-docker.sh
+        run: sudo ./build-docker.sh
 
       - name: Collect image
         id: image
