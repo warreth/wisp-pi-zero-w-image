@@ -1,5 +1,8 @@
 alsa-utils
+alsa-ucm-conf
 libasound2
 libstdc++6
 network-manager
+wpa_supplicant
+rfkill
 openssh-server
