@@ -10,11 +10,23 @@ command -v gh >/dev/null || {
 
 gh auth status >/dev/null
 
-git branch -M main
+CURRENT_BRANCH=$(git symbolic-ref --quiet --short HEAD) || {
+    echo "Not on a branch; check out main first."
+    exit 1
+}
 
 if git remote get-url origin >/dev/null 2>&1; then
     echo "Remote 'origin' already exists."
     exit 1
+fi
+
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    if git show-ref --verify --quiet refs/heads/main; then
+        echo "Branch 'main' already exists; refusing to overwrite it."
+        echo "Rename or merge '$CURRENT_BRANCH' manually."
+        exit 1
+    fi
+    git branch -m "$CURRENT_BRANCH" main
 fi
 
 gh repo create "$REPO" --public --source=. --remote=origin --push

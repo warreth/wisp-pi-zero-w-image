@@ -19,7 +19,18 @@ mkdir -p "$BUILD"
 if [ ! -d "$PIGEN/.git" ]; then
     git clone --branch bookworm https://github.com/RPi-Distro/pi-gen.git "$PIGEN"
 fi
-git -C "$PIGEN" checkout "$PIGEN_COMMIT"
+
+# The build directory is disposable: make sure the pinned commit exists, then
+# discard local modifications from an earlier build.
+if ! git -C "$PIGEN" cat-file -e "${PIGEN_COMMIT}^{commit}" 2>/dev/null; then
+    git -C "$PIGEN" fetch --unshallow origin 2>/dev/null || true
+    git -C "$PIGEN" fetch origin "$PIGEN_COMMIT" 2>/dev/null || true
+fi
+if ! git -C "$PIGEN" cat-file -e "${PIGEN_COMMIT}^{commit}" 2>/dev/null; then
+    echo "Pinned pi-gen commit $PIGEN_COMMIT is not available; remove $PIGEN and retry." >&2
+    exit 1
+fi
+git -C "$PIGEN" checkout -f "$PIGEN_COMMIT"
 
 cp "$ROOT/config" "$PIGEN/config"
 rm -f "$PIGEN/stage2/EXPORT_IMAGE"

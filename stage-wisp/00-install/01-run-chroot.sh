@@ -1,8 +1,12 @@
 #!/bin/bash -e
 export DEBIAN_FRONTEND=noninteractive
 
-# Never ship a usable default password. firstboot unlocks the account only
-# when WISP_SSH_KEY is set (key-only SSH).
+# Never ship a usable default password. Replace the build-time password with
+# a random one, then lock it. firstboot unlocks it only for key-only SSH.
+if id wisp >/dev/null 2>&1; then
+    RANDOM_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+    echo "wisp:${RANDOM_PASSWORD}" | chpasswd
+fi
 if grep -q '^wisp:' /etc/shadow && ! grep -q '^wisp:!' /etc/shadow; then
     sed -i 's/^wisp:/wisp:!/' /etc/shadow
 fi

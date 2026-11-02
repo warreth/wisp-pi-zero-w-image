@@ -42,6 +42,7 @@ conf_get() {
         \"*\") value=${value#\"}; value=${value%\"} ;;
         \'*\') value=${value#\'}; value=${value%\'} ;;
     esac
+    [ -n "$value" ] || value="$default"
     printf '%s' "$value"
 }
 
