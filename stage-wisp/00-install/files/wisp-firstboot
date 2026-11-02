@@ -97,6 +97,7 @@ done
 SAFE_NAME=$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
 [ -n "$SAFE_NAME" ] || SAFE_NAME=wisp
 hostnamectl set-hostname "$SAFE_NAME" || true
+printf '%s\n' "$SAFE_NAME" > /etc/hostname
 if grep -q '^127\.0\.1\.1' /etc/hosts; then
     sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$SAFE_NAME/" /etc/hosts
 else
@@ -121,14 +122,14 @@ EOF
 
 # Optional SSH key, key-only.
 if [ -n "$SSH_KEY" ]; then
+    usermod -U wisp >/dev/null 2>&1 || true
     install -d -m 700 -o wisp -g wisp /home/wisp/.ssh
     printf '%s\n' "$SSH_KEY" > /home/wisp/.ssh/authorized_keys
     chown wisp:wisp /home/wisp/.ssh/authorized_keys
     chmod 600 /home/wisp/.ssh/authorized_keys
-    if [ -f /etc/ssh/sshd_config ]; then
-        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-        grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config
-    fi
+    install -d /etc/ssh/sshd_config.d
+    printf 'PasswordAuthentication no\n' > /etc/ssh/sshd_config.d/00-wisp.conf
+    sshd -t 2>/dev/null || true
     systemctl enable ssh >/dev/null 2>&1 || true
     systemctl restart ssh >/dev/null 2>&1 || true
     echo "SSH enabled with public key."

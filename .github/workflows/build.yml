@@ -48,11 +48,14 @@ jobs:
 
           if [ "$FORCE" = "true" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-          elif gh release view "$TAG" >/dev/null 2>&1; then
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "Release $TAG already exists; nothing to do."
           else
-            echo "build=true" >> "$GITHUB_OUTPUT"
+            ASSETS=$(gh release view "$TAG" --json assets --jq '.assets | length' 2>/dev/null || echo 0)
+            if [ "${ASSETS:-0}" -gt 0 ]; then
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              echo "Release $TAG already has assets; nothing to do."
+            else
+              echo "build=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
   build:
