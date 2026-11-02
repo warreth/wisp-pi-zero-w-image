@@ -3,6 +3,6 @@ alsa-ucm-conf
 libasound2
 libstdc++6
 network-manager
-wpa_supplicant
+wpasupplicant
 rfkill
 openssh-server

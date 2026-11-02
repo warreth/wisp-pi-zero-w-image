@@ -11,8 +11,8 @@ STAGE_LIST='stage0 stage1 stage2 stage-wisp'
 
 TARGET_HOSTNAME='wisp'
 FIRST_USER_NAME='wisp'
-# The account is locked by the first-boot script. This password only exists
-# during image creation and is never used for SSH (SSH is off by default).
+# The account is locked in the image. firstboot unlocks it only when
+# WISP_SSH_KEY is set; SSH stays key-only and is off by default.
 FIRST_USER_PASS='wisp'
 DISABLE_FIRST_BOOT_USER_RENAME='1'
 ENABLE_SSH='0'

@@ -27,20 +27,33 @@ fi
 TMPCONF=$(mktemp)
 tr -d '\r' < "$CONF" > "$TMPCONF"
 
-# shellcheck disable=SC1090
-set -a
-. "$TMPCONF"
-set +a
-rm -f "$TMPCONF"
+# Read KEY="value" without shell evaluation. This keeps $, backticks and #
+# in Wi-Fi passwords literal.
+conf_get() {
+    local key="$1" default="${2:-}" line value
+    line=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$TMPCONF" | tail -n 1 || true)
+    if [ -z "$line" ]; then
+        printf '%s' "$default"
+        return 0
+    fi
+    value=${line#*=}
+    value=$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    case "$value" in
+        \"*\") value=${value#\"}; value=${value%\"} ;;
+        \'*\') value=${value#\'}; value=${value%\'} ;;
+    esac
+    printf '%s' "$value"
+}
 
-SERVER="${WISP_SERVER:-}"
-NAME="${WISP_NAME:-wisp}"
-DEVICE="${WISP_DEVICE:-auto}"
-VOLUME="${WISP_VOLUME:-80}"
-SSID="${WISP_WIFI_SSID:-}"
-PSK="${WISP_WIFI_PASSWORD:-}"
-COUNTRY="${WISP_WIFI_COUNTRY:-BE}"
-SSH_KEY="${WISP_SSH_KEY:-}"
+SERVER=$(conf_get WISP_SERVER "")
+NAME=$(conf_get WISP_NAME "wisp")
+DEVICE=$(conf_get WISP_DEVICE "auto")
+VOLUME=$(conf_get WISP_VOLUME "80")
+SSID=$(conf_get WISP_WIFI_SSID "")
+PSK=$(conf_get WISP_WIFI_PASSWORD "")
+COUNTRY=$(conf_get WISP_WIFI_COUNTRY "BE")
+SSH_KEY=$(conf_get WISP_SSH_KEY "")
+rm -f "$TMPCONF"
 
 if [ -z "$SERVER" ]; then
     echo "ERROR: WISP_SERVER is empty. Edit $CONF."
@@ -62,21 +75,25 @@ rfkill unblock wifi 2>/dev/null || true
 # Wi-Fi credentials from the config file.
 if [ -n "$SSID" ]; then
     if command -v nmcli >/dev/null 2>&1; then
-        echo "Configuring Wi-Fi: $SSID"
-        nmcli radio wifi on || true
-        nmcli device wifi rescan || true
-        sleep 5
-        if nmcli -t -f NAME connection show | grep -Fxq "$SSID"; then
-            nmcli connection modify "$SSID" \
-                wifi-sec.key-mgmt wpa-psk \
-                wifi-sec.psk "$PSK" \
-                connection.autoconnect yes || true
-            nmcli connection up "$SSID" || true
-        elif [ -n "$PSK" ]; then
-            nmcli device wifi connect "$SSID" password "$PSK" || true
-        else
-            nmcli device wifi connect "$SSID" || true
-        fi
+        for attempt in 1 2 3; do
+            echo "Configuring Wi-Fi: $SSID (attempt $attempt)"
+            nmcli radio wifi on || true
+            nmcli device wifi rescan || true
+            sleep 5
+
+            if nmcli -t -f NAME connection show | grep -Fxq "$SSID"; then
+                nmcli connection modify "$SSID" \
+                    wifi-sec.key-mgmt wpa-psk \
+                    wifi-sec.psk "$PSK" \
+                    connection.autoconnect yes || true
+                nmcli connection up "$SSID" && break || true
+            elif [ -n "$PSK" ]; then
+                nmcli device wifi connect "$SSID" password "$PSK" && break || true
+            else
+                nmcli device wifi connect "$SSID" && break || true
+            fi
+            sleep 5
+        done
     else
         echo "WARNING: nmcli not found; cannot configure Wi-Fi."
     fi
@@ -84,12 +101,15 @@ else
     echo "No WISP_WIFI_SSID set; assuming the network is already configured."
 fi
 
-# Give NetworkManager a moment to connect.
+# Wait for the exact connected state; "disconnected" also contains "connected".
 for _ in $(seq 1 30); do
-    if nmcli -t -f GENERAL.STATE device show wlan0 2>/dev/null | grep -q 'connected'; then
-        echo "Wi-Fi connected."
-        break
-    fi
+    STATE=$(nmcli -t -f GENERAL.STATE device show wlan0 2>/dev/null || true)
+    case "$STATE" in
+        *GENERAL.STATE:100*)
+            echo "Wi-Fi connected."
+            break
+            ;;
+    esac
     sleep 2
 done
 
@@ -134,14 +154,21 @@ if [ -n "$SSH_KEY" ]; then
     systemctl restart ssh >/dev/null 2>&1 || true
     echo "SSH enabled with public key."
 else
-    # No SSH by default. Lock the build-time password.
-    passwd -l wisp >/dev/null 2>&1 || true
+    # No SSH by default. Remove an old key/config and disable SSH again.
+    rm -f /home/wisp/.ssh/authorized_keys
+    rm -f /etc/ssh/sshd_config.d/00-wisp.conf
+    systemctl disable --now ssh >/dev/null 2>&1 || true
+    systemctl disable --now ssh.socket >/dev/null 2>&1 || true
+    if ! grep -q '^wisp:!' /etc/shadow; then
+        usermod -L wisp >/dev/null 2>&1 || true
+    fi
     echo "SSH not enabled (no WISP_SSH_KEY)."
 fi
 
 systemctl daemon-reload || true
 systemctl enable wispd >/dev/null 2>&1 || true
-systemctl restart wispd || systemctl start wispd || true
+# Do not block firstboot on wispd: it is ordered After=wisp-firstboot.
+systemctl --no-block restart wispd >/dev/null 2>&1 || true
 
 rm -f /boot/firmware/wisp-reconfigure
 touch /var/lib/wisp-firstboot.done

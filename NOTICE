@@ -17,6 +17,10 @@ Raspberry Pi OS
   Various licenses; see the image's /usr/share/doc and
   https://www.raspberrypi.com/software/ for details.
 
+The generated image includes a copy of the wisp Apache-2.0 license at
+/usr/share/doc/wisp-pi/LICENSE-WISP and this notice at
+/usr/share/doc/wisp-pi/NOTICE.
+
 Music Assistant
   https://github.com/music-assistant/server
   Open source; see the project repository for the license.

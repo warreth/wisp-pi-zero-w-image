@@ -23,6 +23,11 @@ MNT=$(mktemp -d)
 sudo mount -o ro "${LOOP}p2" "$MNT"
 sudo mount -o ro "${LOOP}p1" "$MNT/boot/firmware"
 
+test -f "$MNT/etc/os-release"
+test -x "$MNT/sbin/init"
+test -f "$MNT/boot/firmware/cmdline.txt"
+ls "$MNT"/boot/firmware/kernel*.img >/dev/null 2>&1
+
 test -x "$MNT/usr/local/bin/wispd"
 test -f "$MNT/etc/systemd/system/wispd.service"
 test -f "$MNT/etc/systemd/system/wisp-firstboot.service"
@@ -31,7 +36,9 @@ test -f "$MNT/boot/firmware/wisp.conf"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/wispd.service"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/wisp-firstboot.service"
 
-file "$MNT/usr/local/bin/wispd" | grep -q 'ARM'
+readelf -h "$MNT/usr/local/bin/wispd" | grep -q 'Machine:.*ARM'
+readelf -A "$MNT/usr/local/bin/wispd" | grep -q 'Tag_CPU_arch: v6'
+bash -n "$MNT/usr/local/sbin/wisp-firstboot"
 grep -q '^WISP_SERVER=' "$MNT/boot/firmware/wisp.conf"
 grep -q '^WISP_NAME=' "$MNT/boot/firmware/wisp.conf"
 grep -q '^WISP_WIFI_SSID=' "$MNT/boot/firmware/wisp.conf"

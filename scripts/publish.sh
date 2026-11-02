@@ -10,6 +10,8 @@ command -v gh >/dev/null || {
 
 gh auth status >/dev/null
 
+git branch -M main
+
 if git remote get-url origin >/dev/null 2>&1; then
     echo "Remote 'origin' already exists."
     exit 1
