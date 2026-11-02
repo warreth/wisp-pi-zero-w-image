@@ -1,0 +1,179 @@
+name: Build wisp Pi Zero W image
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and overwrite the release for the current version
+        type: boolean
+        default: false
+  schedule:
+    # Check daily for a new wisp release. GitHub has no cross-repo release trigger.
+    - cron: "17 4 * * *"
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wisp-image
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      revision: ${{ steps.meta.outputs.revision }}
+      tag: ${{ steps.meta.outputs.tag }}
+      build: ${{ steps.meta.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest wisp + image revision
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+          VERSION=$(gh api repos/LeoLTM/wisp/releases/latest --jq .tag_name)
+          REVISION=$(tr -d '[:space:]' < IMAGE_REVISION)
+          TAG="wisp-${VERSION}-r${REVISION}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if [ "$FORCE" = "true" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; nothing to do."
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          df -h
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file xz-utils
+
+      - name: Clone pi-gen (bookworm / armhf)
+        run: |
+          git clone --depth 1 --branch bookworm \
+            https://github.com/RPi-Distro/pi-gen.git .build/pi-gen
+
+      - name: Prepare pi-gen
+        run: |
+          set -euo pipefail
+          cp config .build/pi-gen/config
+          rm -f .build/pi-gen/stage2/EXPORT_IMAGE
+          cp -a stage-wisp .build/pi-gen/stage-wisp
+          ./scripts/fetch-wisp.sh "${{ needs.check.outputs.version }}" \
+            .build/pi-gen/stage-wisp/00-install/files
+
+      - name: Build image
+        working-directory: .build/pi-gen
+        run: sudo ./build-docker.sh
+
+      - name: Collect image
+        id: image
+        run: |
+          set -euo pipefail
+          SRC=$(find .build/pi-gen/deploy -maxdepth 1 -name '*.img.xz' | head -1)
+          test -n "$SRC"
+          ASSET="wisp-pi-zero-w-${{ needs.check.outputs.version }}-r${{ needs.check.outputs.revision }}.img.xz"
+          cp "$SRC" "$ASSET"
+          xz -t "$ASSET"
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+          ls -lh "$ASSET" "$ASSET.sha256"
+
+      - name: Validate image contents
+        run: |
+          set -euo pipefail
+          xz -dc "${{ steps.image.outputs.asset }}" > /tmp/wisp.img
+          sudo ./scripts/validate-image.sh /tmp/wisp.img
+          rm -f /tmp/wisp.img
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wisp-pi-zero-w-${{ needs.check.outputs.version }}
+          path: |
+            ${{ steps.image.outputs.asset }}
+            ${{ steps.image.outputs.asset }}.sha256
+          retention-days: 7
+
+      - name: Write release notes
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          # wisp Pi Zero W image
+
+          A minimal Raspberry Pi OS Lite (Legacy 32-bit, Bookworm) image for
+          **Raspberry Pi Zero W v1.1 / ARMv6**, with `wisp` preinstalled.
+
+          ## Flash
+
+          1. Download the `.img.xz` asset below.
+          2. Flash it with Raspberry Pi Imager: **Choose OS → Use custom**.
+          3. Open the `bootfs` partition and edit **`wisp.conf`**:
+             - `WISP_SERVER` = your Music Assistant Sendspin URL
+             - `WISP_NAME` = room name
+             - `WISP_WIFI_SSID` / `WISP_WIFI_PASSWORD` = your 2.4 GHz Wi-Fi
+          4. Eject, insert the SD card, and power the Pi.
+          5. After 1–3 minutes, check `wisp-firstboot.log` on `bootfs`.
+          6. The player appears in Music Assistant → Players.
+
+          SSH is disabled by default. For debugging, put a public key in
+          `WISP_SSH_KEY` in `wisp.conf`; password login stays disabled.
+
+          This is an unofficial community image. `wisp` is an unofficial
+          ARMv6 Sendspin client, not part of the Open Home Foundation.
+          EOF
+          {
+            echo
+            echo "Build metadata:"
+            echo
+            echo "- wisp: \`${{ needs.check.outputs.version }}\`"
+            echo "- image revision: \`${{ needs.check.outputs.revision }}\`"
+            echo "- base: Raspberry Pi OS Lite Legacy 32-bit (Bookworm)"
+            echo "- target: Raspberry Pi Zero W v1.1 (ARMv6)"
+            echo
+            echo "SHA-256: see the \`.sha256\` asset."
+          } >> RELEASE_NOTES.md
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.check.outputs.tag }}"
+          ASSET="${{ steps.image.outputs.asset }}"
+          SHA="$ASSET.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" "$SHA" --clobber
+          else
+            gh release create "$TAG" "$ASSET" "$SHA" \
+              --title "wisp ${{ needs.check.outputs.version }} for Pi Zero W" \
+              --notes-file RELEASE_NOTES.md \
+              --latest
+          fi

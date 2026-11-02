@@ -1,0 +1,24 @@
+# pi-gen configuration for the wisp Pi Zero W image.
+# Build with the pi-gen "bookworm" branch (32-bit / armhf).
+
+IMG_NAME='wisp-pi-zero-w'
+PI_GEN_RELEASE='wisp-pi'
+RELEASE='bookworm'
+ARCH='armhf'
+DEPLOY_COMPRESSION='xz'
+COMPRESSION_LEVEL='9'
+STAGE_LIST='stage0 stage1 stage2 stage-wisp'
+
+TARGET_HOSTNAME='wisp'
+FIRST_USER_NAME='wisp'
+# The account is locked by the first-boot script. This password only exists
+# during image creation and is never used for SSH (SSH is off by default).
+FIRST_USER_PASS='wisp'
+DISABLE_FIRST_BOOT_USER_RENAME='1'
+ENABLE_SSH='0'
+
+WPA_COUNTRY='BE'
+TIMEZONE_DEFAULT='Europe/Brussels'
+LOCALE_DEFAULT='en_GB.UTF-8'
+KEYBOARD_KEYMAP='be'
+KEYBOARD_LAYOUT='Belgian'

@@ -1,0 +1,15 @@
+[Unit]
+Description=wisp first boot configuration
+After=network-online.target NetworkManager-wait-online.service
+Wants=network-online.target
+Before=wispd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wisp-firstboot
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

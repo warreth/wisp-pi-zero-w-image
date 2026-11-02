@@ -1,0 +1,147 @@
+#!/bin/bash
+set -euo pipefail
+
+CONF=/boot/firmware/wisp.conf
+LOG=/boot/firmware/wisp-firstboot.log
+
+if ! touch "$LOG" 2>/dev/null; then
+    LOG=/var/log/wisp-firstboot.log
+    touch "$LOG"
+fi
+exec >>"$LOG" 2>&1
+
+echo "=== wisp first boot $(date -Is) ==="
+
+# Runs once, or again when an empty "wisp-reconfigure" file is placed on bootfs.
+if [ -f /var/lib/wisp-firstboot.done ] && [ ! -f /boot/firmware/wisp-reconfigure ]; then
+    echo "Already configured. Create /boot/firmware/wisp-reconfigure to reapply."
+    exit 0
+fi
+
+if [ ! -f "$CONF" ]; then
+    echo "No $CONF; nothing to do."
+    exit 0
+fi
+
+# Strip Windows CRLF so the file can be edited on any OS.
+TMPCONF=$(mktemp)
+tr -d '\r' < "$CONF" > "$TMPCONF"
+
+# shellcheck disable=SC1090
+set -a
+. "$TMPCONF"
+set +a
+rm -f "$TMPCONF"
+
+SERVER="${WISP_SERVER:-}"
+NAME="${WISP_NAME:-wisp}"
+DEVICE="${WISP_DEVICE:-auto}"
+VOLUME="${WISP_VOLUME:-80}"
+SSID="${WISP_WIFI_SSID:-}"
+PSK="${WISP_WIFI_PASSWORD:-}"
+COUNTRY="${WISP_WIFI_COUNTRY:-BE}"
+SSH_KEY="${WISP_SSH_KEY:-}"
+
+if [ -z "$SERVER" ]; then
+    echo "ERROR: WISP_SERVER is empty. Edit $CONF."
+    exit 1
+fi
+case "$SERVER" in
+    ws://*|wss://*) ;;
+    *) echo "ERROR: WISP_SERVER must start with ws:// or wss://"; exit 1 ;;
+esac
+
+echo "Config: name=$NAME server=$SERVER device=$DEVICE"
+
+# Wi-Fi regulatory domain.
+if command -v raspi-config >/dev/null 2>&1; then
+    raspi-config nonint do_wifi_country "$COUNTRY" || true
+fi
+rfkill unblock wifi 2>/dev/null || true
+
+# Wi-Fi credentials from the config file.
+if [ -n "$SSID" ]; then
+    if command -v nmcli >/dev/null 2>&1; then
+        echo "Configuring Wi-Fi: $SSID"
+        nmcli radio wifi on || true
+        nmcli device wifi rescan || true
+        sleep 5
+        if nmcli -t -f NAME connection show | grep -Fxq "$SSID"; then
+            nmcli connection modify "$SSID" \
+                wifi-sec.key-mgmt wpa-psk \
+                wifi-sec.psk "$PSK" \
+                connection.autoconnect yes || true
+            nmcli connection up "$SSID" || true
+        elif [ -n "$PSK" ]; then
+            nmcli device wifi connect "$SSID" password "$PSK" || true
+        else
+            nmcli device wifi connect "$SSID" || true
+        fi
+    else
+        echo "WARNING: nmcli not found; cannot configure Wi-Fi."
+    fi
+else
+    echo "No WISP_WIFI_SSID set; assuming the network is already configured."
+fi
+
+# Give NetworkManager a moment to connect.
+for _ in $(seq 1 30); do
+    if nmcli -t -f GENERAL.STATE device show wlan0 2>/dev/null | grep -q 'connected'; then
+        echo "Wi-Fi connected."
+        break
+    fi
+    sleep 2
+done
+
+# Hostname from the friendly name.
+SAFE_NAME=$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+[ -n "$SAFE_NAME" ] || SAFE_NAME=wisp
+hostnamectl set-hostname "$SAFE_NAME" || true
+if grep -q '^127\.0\.1\.1' /etc/hosts; then
+    sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$SAFE_NAME/" /etc/hosts
+else
+    printf '127.0.1.1\t%s\n' "$SAFE_NAME" >> /etc/hosts
+fi
+
+# Find the USB sound card if the user left DEVICE=auto.
+if [ "$DEVICE" = "auto" ]; then
+    CARD=$(aplay -l 2>/dev/null | awk '/USB Audio|USB PnP|USB Audio Device/ {gsub(":","",$2); print $2; exit}')
+    DEVICE="plughw:${CARD:-1},0"
+fi
+echo "Using ALSA device: $DEVICE"
+
+# Write the real wisp configuration.
+cat > /etc/wispd.conf <<EOF
+server_url = $SERVER
+name = $NAME
+device = $DEVICE
+initial_volume = $VOLUME
+log_level = info
+EOF
+
+# Optional SSH key, key-only.
+if [ -n "$SSH_KEY" ]; then
+    install -d -m 700 -o wisp -g wisp /home/wisp/.ssh
+    printf '%s\n' "$SSH_KEY" > /home/wisp/.ssh/authorized_keys
+    chown wisp:wisp /home/wisp/.ssh/authorized_keys
+    chmod 600 /home/wisp/.ssh/authorized_keys
+    if [ -f /etc/ssh/sshd_config ]; then
+        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config
+    fi
+    systemctl enable ssh >/dev/null 2>&1 || true
+    systemctl restart ssh >/dev/null 2>&1 || true
+    echo "SSH enabled with public key."
+else
+    # No SSH by default. Lock the build-time password.
+    passwd -l wisp >/dev/null 2>&1 || true
+    echo "SSH not enabled (no WISP_SSH_KEY)."
+fi
+
+systemctl daemon-reload || true
+systemctl enable wispd >/dev/null 2>&1 || true
+systemctl restart wispd || systemctl start wispd || true
+
+rm -f /boot/firmware/wisp-reconfigure
+touch /var/lib/wisp-firstboot.done
+echo "=== wisp first boot done ==="

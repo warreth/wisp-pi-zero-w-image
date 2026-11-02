@@ -1,0 +1,11 @@
+.build/
+deploy/
+*.img
+*.img.xz
+*.img.xz.sha256
+*.sha256
+
+# Downloaded from the wisp release at build time.
+stage-wisp/00-install/files/wispd
+stage-wisp/00-install/files/wispd.service
+stage-wisp/00-install/files/.wisp-version

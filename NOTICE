@@ -1,0 +1,29 @@
+This repository builds a Raspberry Pi OS image that contains third-party
+software.
+
+wisp
+  https://github.com/LeoLTM/wisp
+  Apache License 2.0
+  Unofficial ARMv6 Sendspin client. Not affiliated with or endorsed by the
+  Open Home Foundation or the Sendspin project.
+
+pi-gen
+  https://github.com/RPi-Distro/pi-gen
+  BSD 3-Clause License
+  Used at build time to create the Raspberry Pi OS image.
+
+Raspberry Pi OS
+  https://www.raspberrypi.com/software/
+  Various licenses; see the image's /usr/share/doc and
+  https://www.raspberrypi.com/software/ for details.
+
+Music Assistant
+  https://github.com/music-assistant/server
+  Open source; see the project repository for the license.
+
+Sendspin
+  https://github.com/Sendspin/spec
+  Open specification; "Sendspin" is a trademark of the Open Home Foundation.
+
+The generated image is provided as-is. Review the licenses of all components
+before redistributing it.

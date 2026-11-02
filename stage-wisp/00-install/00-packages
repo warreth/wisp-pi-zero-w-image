@@ -1,0 +1,5 @@
+alsa-utils
+libasound2
+libstdc++6
+network-manager
+openssh-server
